@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "StorageUnit": {
+      "title": "StorageUnit",
+      "description": "A physical storage location in the house.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the storage unit (e.g., Kitchen Cupboard)."
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the user who owns this storage unit."
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp of the last update."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Base64 encoded image or URL of the storage unit."
+        }
+      },
+      "required": ["name", "ownerId", "updatedAt"]
+    },
+    "Item": {
+      "title": "Item",
+      "description": "An object stored inside a storage unit.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the item."
+        },
+        "storageId": {
+          "type": "string",
+          "description": "The ID of the storage unit where this item is located."
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the user who owns this item."
+        },
+        "detectedAt": {
+          "type": "number",
+          "description": "Timestamp when the item was detected."
+        }
+      },
+      "required": ["name", "storageId", "ownerId", "detectedAt"]
+    }
+  },
+  "firestore": {
+    "/storageUnits/{unitId}": {
+      "schema": "StorageUnit",
+      "description": "Collection of storage units."
+    },
+    "/items/{itemId}": {
+      "schema": "Item",
+      "description": "Collection of items across all storage units."
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "MemoryMap",
+  "description": "An AI-powered assistant for dementia patients to track and find items in their home using object recognition.",
+  "requestFramePermissions": ["camera"]
+}

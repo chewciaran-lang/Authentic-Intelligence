@@ -1,0 +1,98 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: storageUnits
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required) - Name of the storage unit
+//   - ownerId: string (required) - UID of the owner
+//   - updatedAt: number (required) - Timestamp
+//
+// Collection: items
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required) - Name of the item
+//   - storageId: string (required) - ID of the storage unit
+//   - ownerId: string (required) - UID of the owner
+//   - detectedAt: number (required) - Timestamp
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerId;
+    }
+
+    function isRequestOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.ownerId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidStorageUnit(data) {
+      return hasRequiredFields(['name', 'ownerId', 'updatedAt']) &&
+             hasOnlyAllowedFields(['name', 'ownerId', 'updatedAt', 'imageUrl']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.ownerId is string &&
+             data.updatedAt is number &&
+             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() < 1048576)); // Limit to ~1MB
+    }
+
+    function isValidItem(data) {
+      return hasRequiredFields(['name', 'storageId', 'ownerId', 'detectedAt']) &&
+             hasOnlyAllowedFields(['name', 'storageId', 'ownerId', 'detectedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.storageId is string &&
+             data.ownerId is string &&
+             data.detectedAt is number;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /storageUnits/{unitId} {
+      allow read: if isDocOwner();
+      allow create: if isRequestOwner() && isValidStorageUnit(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidStorageUnit(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+
+    match /items/{itemId} {
+      allow read: if isDocOwner();
+      allow create: if isRequestOwner() && isValidItem(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidItem(request.resource.data);
+      allow delete: if isDocOwner();
+    }
+    
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

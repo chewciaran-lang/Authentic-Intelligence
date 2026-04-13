@@ -37,6 +37,13 @@
         "email": {
           "type": "string",
           "description": "User's email address."
+        },
+        "customCategories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Custom categories defined by the user."
         }
       },
       "required": ["role", "email"]

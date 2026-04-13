@@ -71,9 +71,10 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return hasRequiredFields(['role', 'email']) &&
-             hasOnlyAllowedFields(['role', 'email']) &&
+             hasOnlyAllowedFields(['role', 'email', 'customCategories']) &&
              data.role in ['caregiver', 'patient'] &&
-             data.email is string;
+             data.email is string &&
+             (!('customCategories' in data) || (data.customCategories is list && data.customCategories.size() <= 20));
     }
 
     function isValidItem(data) {

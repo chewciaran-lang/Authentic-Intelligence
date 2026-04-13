@@ -17,6 +17,7 @@ export interface UserProfile {
   id: string;
   role: 'caregiver' | 'patient';
   email: string;
+  customCategories?: string[];
 }
 
 export interface StorageUnit {

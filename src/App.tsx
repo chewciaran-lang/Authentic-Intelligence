@@ -16,6 +16,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 
+const DEFAULT_CATEGORIES = ["Kitchen", "Medication", "Tools", "Documents", "Clothing", "Electronics"];
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -27,11 +29,14 @@ export default function App() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerMode, setScannerMode] = useState<'inventory' | 'lookup'>('inventory');
   const [activeStorageId, setActiveStorageId] = useState<string | null>(null);
+  const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [newStorageName, setNewStorageName] = useState("");
   const [newStorageImage, setNewStorageImage] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isCapturingUnitImage, setIsCapturingUnitImage] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [editingItemName, setEditingItemName] = useState("");
   const [editingItemCategory, setEditingItemCategory] = useState("");
@@ -127,6 +132,30 @@ export default function App() {
       setUserProfile(profile);
       toast.success(`Switched to ${newRole} mode`);
     }
+  };
+
+  const handleAddCustomCategory = async () => {
+    if (!user || !userProfile || !newCategoryName.trim()) return;
+    const current = userProfile.customCategories || [];
+    if (current.includes(newCategoryName.trim())) {
+      toast.error("Category already exists");
+      return;
+    }
+    
+    await firebaseStore.updateUserProfile(user.uid, {
+      customCategories: [...current, newCategoryName.trim()]
+    });
+    setNewCategoryName("");
+    toast.success("Category added");
+  };
+
+  const handleDeleteCustomCategory = async (cat: string) => {
+    if (!user || !userProfile) return;
+    const current = userProfile.customCategories || [];
+    await firebaseStore.updateUserProfile(user.uid, {
+      customCategories: current.filter(c => c !== cat)
+    });
+    toast.success("Category removed");
   };
 
   useEffect(() => {
@@ -249,6 +278,18 @@ export default function App() {
         .filter(res => res.unit)
     : [];
 
+  const categories = Array.from(new Set([
+    ...DEFAULT_CATEGORIES, 
+    ...(userProfile?.customCategories || []),
+    ...allItems.map(item => item.category).filter(Boolean)
+  ])) as string[];
+
+  const filteredStorageUnits = selectedCategory 
+    ? storageUnits.filter(unit => 
+        allItems.some(item => item.storageId === unit.id && item.category === selectedCategory)
+      )
+    : storageUnits;
+
   if (!isAuthReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f5f5f5]">
@@ -353,6 +394,38 @@ export default function App() {
       </header>
 
       <main className="max-w-2xl mx-auto p-4 space-y-6">
+        {/* Category Toggles */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          <Button
+            variant={selectedCategory === null ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSelectedCategory(null)}
+            className="rounded-full shrink-0 h-8 px-4 text-xs font-medium"
+          >
+            All
+          </Button>
+          {categories.map(category => (
+            <Button
+              key={category}
+              variant={selectedCategory === category ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedCategory(selectedCategory === category ? null : category)}
+              className="rounded-full shrink-0 h-8 px-4 text-xs font-medium capitalize"
+            >
+              {category}
+            </Button>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsManageCategoriesOpen(true)}
+            className="rounded-full shrink-0 h-8 px-3 text-xs font-medium text-zinc-400 hover:text-zinc-900"
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            Edit
+          </Button>
+        </div>
+
         {/* Search Results */}
         <AnimatePresence>
           {searchQuery && (
@@ -463,8 +536,14 @@ export default function App() {
               Where does this go?
             </Button>
 
-            {storageUnits.map((unit) => {
+            {filteredStorageUnits.map((unit) => {
               const unitItems = allItems.filter(i => i.storageId === unit.id);
+              const matchingItems = selectedCategory 
+                ? unitItems.filter(i => i.category === selectedCategory)
+                : unitItems;
+              
+              if (selectedCategory && matchingItems.length === 0) return null;
+
               return (
                 <Card 
                   key={unit.id} 
@@ -492,7 +571,14 @@ export default function App() {
                     <div>
                       <CardTitle className="text-xl font-bold">{unit.name}</CardTitle>
                       <CardDescription>
-                        {unitItems.length} items • Updated {new Date(unit.updatedAt).toLocaleDateString()}
+                        {selectedCategory ? (
+                          <span className="text-zinc-900 font-medium">
+                            {matchingItems.length} {selectedCategory} items
+                          </span>
+                        ) : (
+                          <span>{unitItems.length} items</span>
+                        )}
+                        {" • "}Updated {new Date(unit.updatedAt).toLocaleDateString()}
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
@@ -523,7 +609,9 @@ export default function App() {
                       {selectedUnitId === unit.id ? (
                         <div className="w-full space-y-4 pt-2" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">All Items ({unitItems.length})</h3>
+                            <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">
+                              {selectedCategory ? `${selectedCategory} Items` : 'All Items'} ({matchingItems.length})
+                            </h3>
                           </div>
                           
                           <div className="flex flex-col gap-2">
@@ -550,10 +638,26 @@ export default function App() {
                                 <Plus className="h-5 w-5" />
                               </Button>
                             </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {categories.slice(0, 8).map(cat => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => setEditingItemCategory(editingItemCategory === cat ? "" : cat)}
+                                  className={`text-[10px] px-2 py-1 rounded-full border transition-all ${
+                                    editingItemCategory === cat 
+                                      ? "bg-zinc-900 text-white border-zinc-900" 
+                                      : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                                  }`}
+                                >
+                                  {cat}
+                                </button>
+                              ))}
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {unitItems.map((item) => (
+                            {matchingItems.map((item) => (
                               <div key={item.id} className="bg-zinc-100 p-3 rounded-xl flex items-center justify-between group/item">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Archive className="h-4 w-4 text-zinc-400 shrink-0" />
@@ -729,6 +833,75 @@ export default function App() {
         </Dialog>
       </div>
 
+      {/* Category Management Dialog */}
+      <Dialog open={isManageCategoriesOpen} onOpenChange={setIsManageCategoriesOpen}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Manage Categories</DialogTitle>
+            <DialogDescription>
+              Add or remove categories from your suggestions.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Input 
+                placeholder="New category name..." 
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddCustomCategory()}
+                className="h-12 rounded-xl"
+              />
+              <Button 
+                onClick={handleAddCustomCategory}
+                className="h-12 w-12 rounded-xl bg-zinc-900 text-white shrink-0"
+              >
+                <Plus className="h-6 w-6" />
+              </Button>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Your Categories</h4>
+              <div className="flex flex-wrap gap-2">
+                {userProfile?.customCategories?.map((cat, i) => (
+                  <Badge key={i} variant="secondary" className="pl-3 pr-1 py-1.5 flex items-center gap-2 bg-zinc-100 text-zinc-700 border-zinc-200 rounded-full">
+                    {cat}
+                    <button 
+                      onClick={() => handleDeleteCustomCategory(cat)}
+                      className="p-1 hover:bg-zinc-200 rounded-full transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+                {(!userProfile?.customCategories || userProfile.customCategories.length === 0) && (
+                  <p className="text-zinc-400 text-sm italic">No custom categories yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Default Categories</h4>
+              <div className="flex flex-wrap gap-2">
+                {DEFAULT_CATEGORIES.map((cat, i) => (
+                  <Badge key={i} variant="outline" className="px-3 py-1.5 bg-white text-zinc-400 border-zinc-200 rounded-full">
+                    {cat}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-400 italic">Default categories cannot be removed.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={() => setIsManageCategoriesOpen(false)} 
+              className="w-full h-12 rounded-xl bg-zinc-100 text-zinc-900 hover:bg-zinc-200"
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Item Edit Dialog */}
       <Dialog open={!!editingItem} onOpenChange={(open) => !open && setEditingItem(null)}>
         <DialogContent className="sm:max-w-md rounded-3xl">
@@ -753,6 +926,25 @@ export default function App() {
                   className="h-12 rounded-xl"
                   placeholder="e.g. Kitchen, Tools, etc."
                 />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {categories.map(cat => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setEditingItem({ 
+                        ...editingItem, 
+                        category: editingItem.category === cat ? "" : cat 
+                      })}
+                      className={`text-[10px] px-2.5 py-1.5 rounded-full border transition-all ${
+                        editingItem.category === cat 
+                          ? "bg-zinc-900 text-white border-zinc-900" 
+                          : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-zinc-500">Location</label>

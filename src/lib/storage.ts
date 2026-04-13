@@ -134,13 +134,19 @@ export const firebaseStore = {
     if (!auth.currentUser) throw new Error("Not authenticated");
     const path = `items/${itemId}`;
     try {
-      const data: any = { ...updates };
-      // Ensure nulls for optional fields if they are explicitly undefined
-      if ('category' in updates && updates.category === undefined) data.category = null;
-      if ('description' in updates && updates.description === undefined) data.description = null;
-      if ('lastSeenAt' in updates && updates.lastSeenAt === undefined) data.lastSeenAt = null;
-      if ('caregiverNotes' in updates && updates.caregiverNotes === undefined) data.caregiverNotes = null;
-      if ('customLabels' in updates && updates.customLabels === undefined) data.customLabels = null;
+      // Create a clean data object without undefined values
+      const data: any = {};
+      Object.keys(updates).forEach(key => {
+        const value = (updates as any)[key];
+        if (value !== undefined) {
+          data[key] = value;
+        }
+      });
+
+      // Handle specific fields that should be null if they are empty strings or explicitly requested
+      if (data.category === "") data.category = null;
+      if (data.description === "") data.description = null;
+      if (data.caregiverNotes === "") data.caregiverNotes = null;
       
       await updateDoc(doc(db, 'items', itemId), data);
     } catch (error) {
@@ -175,8 +181,13 @@ export const firebaseStore = {
 
   updateUserProfile: async (uid: string, updates: Partial<UserProfile>) => {
     try {
-      const data: any = { ...updates };
-      delete data.id;
+      const data: any = {};
+      Object.keys(updates).forEach(key => {
+        const value = (updates as any)[key];
+        if (value !== undefined && key !== 'id') {
+          data[key] = value;
+        }
+      });
       await updateDoc(doc(db, 'users', uid), data);
     } catch (error) {
       console.error("Error updating user profile:", error);

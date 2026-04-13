@@ -1,18 +1,23 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Camera, X, Check, Loader2, RefreshCw, Plus, Trash2 } from "lucide-react";
+import { Camera, X, Check, Loader2, RefreshCw, Plus, Trash2, MapPin, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { detectObjects, DetectedObject, preloadModel } from "../lib/vision";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "motion/react";
+import { StorageUnit, Item } from "../types";
 
 interface ScannerProps {
-  onScanComplete: (items: string[]) => void;
+  onScanComplete?: (items: string[]) => void;
+  onLookupComplete?: (unitId: string) => void;
   onClose: () => void;
+  mode?: 'inventory' | 'lookup';
+  storageUnits?: StorageUnit[];
+  allItems?: Item[];
 }
 
-export function Scanner({ onScanComplete, onClose }: ScannerProps) {
+export function Scanner({ onScanComplete, onLookupComplete, onClose, mode = 'inventory', storageUnits = [], allItems = [] }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -92,6 +97,12 @@ export function Scanner({ onScanComplete, onClose }: ScannerProps) {
     setDetectedItems(prev => prev.filter(i => i !== name));
   };
 
+  const getLookupResult = (name: string) => {
+    const item = allItems.find(i => i.name.toLowerCase() === name.toLowerCase());
+    if (!item) return null;
+    return storageUnits.find(u => u.id === item.storageId);
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col p-4">
       <div className="flex justify-between items-center mb-4">
@@ -144,12 +155,14 @@ export function Scanner({ onScanComplete, onClose }: ScannerProps) {
 
       <div className="mt-4 bg-zinc-900 rounded-2xl p-4 border border-zinc-800 flex flex-col gap-4">
         <div className="flex justify-between items-center">
-          <h3 className="text-zinc-400 text-sm font-medium uppercase tracking-wider">Items to Save</h3>
-          {detectedItems.length > 0 && (
+          <h3 className="text-zinc-400 text-sm font-medium uppercase tracking-wider">
+            {mode === 'inventory' ? 'Items to Save' : 'Find Location'}
+          </h3>
+          {mode === 'inventory' && detectedItems.length > 0 && (
             <Button 
               variant="secondary" 
               size="sm" 
-              onClick={() => onScanComplete(detectedItems)}
+              onClick={() => onScanComplete?.(detectedItems)}
               className="bg-green-600 hover:bg-green-700 text-white border-none"
             >
               <Check className="h-4 w-4 mr-2" />
@@ -158,45 +171,85 @@ export function Scanner({ onScanComplete, onClose }: ScannerProps) {
           )}
         </div>
 
-        <div className="flex gap-2">
-          <Input 
-            placeholder="Add item manually..." 
-            value={manualItem}
-            onChange={(e) => setManualItem(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addManualItem()}
-            className="bg-zinc-800 border-zinc-700 text-white h-10 rounded-xl"
-          />
-          <Button size="icon" onClick={addManualItem} className="bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl h-10 w-10">
-            <Plus className="h-5 w-5" />
-          </Button>
-        </div>
+        {mode === 'inventory' && (
+          <div className="flex gap-2">
+            <Input 
+              placeholder="Add item manually..." 
+              value={manualItem}
+              onChange={(e) => setManualItem(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addManualItem()}
+              className="bg-zinc-800 border-zinc-700 text-white h-10 rounded-xl"
+            />
+            <Button size="icon" onClick={addManualItem} className="bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl h-10 w-10">
+              <Plus className="h-5 w-5" />
+            </Button>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 min-h-[40px]">
           <AnimatePresence>
-            {detectedItems.map((name, idx) => (
-              <motion.div
-                key={name + idx}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-              >
-                <Badge 
-                  variant="outline" 
-                  className="text-white border-zinc-700 py-1.5 pl-3 pr-1 flex items-center gap-1 group"
+            {detectedItems.map((name, idx) => {
+              const unit = mode === 'lookup' ? getLookupResult(name) : null;
+              
+              return (
+                <motion.div
+                  key={name + idx}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="w-full"
                 >
-                  {name}
-                  <button 
-                    onClick={() => removeItem(name)}
-                    className="p-1 hover:bg-zinc-700 rounded-full transition-colors"
-                  >
-                    <X className="h-3 w-3 text-zinc-500 group-hover:text-red-400" />
-                  </button>
-                </Badge>
-              </motion.div>
-            ))}
+                  {mode === 'lookup' ? (
+                    <div className="bg-zinc-800 p-3 rounded-xl flex items-center justify-between border border-zinc-700">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-zinc-700 flex items-center justify-center text-white">
+                          <Search className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-white font-medium">{name}</p>
+                          {unit ? (
+                            <p className="text-zinc-400 text-xs flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              Belongs in: {unit.name}
+                            </p>
+                          ) : (
+                            <p className="text-zinc-500 text-xs italic">Not found in database</p>
+                          )}
+                        </div>
+                      </div>
+                      {unit && (
+                        <Button 
+                          size="sm" 
+                          variant="secondary"
+                          className="rounded-full bg-white text-black hover:bg-zinc-200"
+                          onClick={() => onLookupComplete?.(unit.id)}
+                        >
+                          Show Me
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Badge 
+                      variant="outline" 
+                      className="text-white border-zinc-700 py-1.5 pl-3 pr-1 flex items-center gap-1 group"
+                    >
+                      {name}
+                      <button 
+                        onClick={() => removeItem(name)}
+                        className="p-1 hover:bg-zinc-700 rounded-full transition-colors"
+                      >
+                        <X className="h-3 w-3 text-zinc-500 group-hover:text-red-400" />
+                      </button>
+                    </Badge>
+                  )}
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
           {detectedItems.length === 0 && !isScanning && (
-            <p className="text-zinc-500 text-sm italic">No items yet. Scan or add manually.</p>
+            <p className="text-zinc-500 text-sm italic">
+              {mode === 'lookup' ? 'Scan an item to find its home' : 'No items yet. Scan or add manually.'}
+            </p>
           )}
         </div>
         

@@ -24,6 +24,23 @@
       },
       "required": ["name", "ownerId", "updatedAt"]
     },
+    "User": {
+      "title": "User",
+      "description": "User profile and role information.",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["caregiver", "patient"],
+          "description": "The role of the user."
+        },
+        "email": {
+          "type": "string",
+          "description": "User's email address."
+        }
+      },
+      "required": ["role", "email"]
+    },
     "Item": {
       "title": "Item",
       "description": "An object stored inside a storage unit.",
@@ -44,6 +61,41 @@
         "detectedAt": {
           "type": "number",
           "description": "Timestamp when the item was detected."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the item (e.g., kitchen, medication, documents)."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the item."
+        },
+        "lastSeenAt": {
+          "type": "number",
+          "description": "Timestamp when the item was last seen or opened."
+        },
+        "isEssential": {
+          "type": "boolean",
+          "description": "Caregiver tag: Essential item."
+        },
+        "isFrequentlyLost": {
+          "type": "boolean",
+          "description": "Caregiver tag: Frequently lost item."
+        },
+        "isEmergency": {
+          "type": "boolean",
+          "description": "Caregiver tag: Emergency item."
+        },
+        "caregiverNotes": {
+          "type": "string",
+          "description": "Private notes from the caregiver."
+        },
+        "customLabels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Custom labels added by the caregiver (e.g., fragile, do not move)."
         }
       },
       "required": ["name", "storageId", "ownerId", "detectedAt"]
@@ -57,6 +109,10 @@
     "/items/{itemId}": {
       "schema": "Item",
       "description": "Collection of items across all storage units."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles."
     }
   }
 }

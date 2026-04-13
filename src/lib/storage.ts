@@ -12,7 +12,8 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { AppState, StorageUnit, Item } from "../types";
+import { AppState, StorageUnit, Item, UserProfile } from "../types";
+import { getDoc, setDoc } from 'firebase/firestore';
 
 export enum OperationType {
   CREATE = 'create',
@@ -85,7 +86,7 @@ export const firebaseStore = {
     }
   },
 
-  updateItems: async (storageId: string, itemNames: string[]) => {
+  updateItems: async (storageId: string, items: (string | { name: string, category?: string })[]) => {
     if (!auth.currentUser) throw new Error("Not authenticated");
     const path = 'items';
     const uid = auth.currentUser?.uid;
@@ -103,10 +104,15 @@ export const firebaseStore = {
       snapshot.docs.forEach((d) => batch.delete(d.ref));
       
       // Add new items
-      itemNames.forEach((name) => {
+      items.forEach((item) => {
+        const name = typeof item === 'string' ? item : item.name;
+        const category = typeof item === 'string' ? undefined : item.category;
+        
         const newDoc = doc(collection(db, path));
         batch.set(newDoc, {
           name,
+          category: category || null,
+          description: (item as any).description || null,
           storageId,
           ownerId: auth.currentUser!.uid,
           detectedAt: Date.now(),
@@ -121,6 +127,71 @@ export const firebaseStore = {
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  updateItem: async (itemId: string, updates: Partial<Item>) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `items/${itemId}`;
+    try {
+      const data: any = { ...updates };
+      // Ensure nulls for optional fields if they are explicitly undefined
+      if ('category' in updates && updates.category === undefined) data.category = null;
+      if ('description' in updates && updates.description === undefined) data.description = null;
+      if ('lastSeenAt' in updates && updates.lastSeenAt === undefined) data.lastSeenAt = null;
+      if ('caregiverNotes' in updates && updates.caregiverNotes === undefined) data.caregiverNotes = null;
+      if ('customLabels' in updates && updates.customLabels === undefined) data.customLabels = null;
+      
+      await updateDoc(doc(db, 'items', itemId), data);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  getUserProfile: async (uid: string): Promise<UserProfile | null> => {
+    try {
+      const docRef = doc(db, 'users', uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        return { id: docSnap.id, ...docSnap.data() } as UserProfile;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      return null;
+    }
+  },
+
+  createUserProfile: async (uid: string, email: string, role: 'caregiver' | 'patient') => {
+    try {
+      await setDoc(doc(db, 'users', uid), {
+        email,
+        role
+      });
+    } catch (error) {
+      console.error("Error creating user profile:", error);
+    }
+  },
+
+  updateUserProfile: async (uid: string, updates: Partial<UserProfile>) => {
+    try {
+      const data: any = { ...updates };
+      delete data.id;
+      await updateDoc(doc(db, 'users', uid), data);
+    } catch (error) {
+      console.error("Error updating user profile:", error);
+    }
+  },
+
+  markItemAsSeen: async (itemId: string) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `items/${itemId}`;
+    try {
+      await updateDoc(doc(db, 'items', itemId), {
+        lastSeenAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   },
 

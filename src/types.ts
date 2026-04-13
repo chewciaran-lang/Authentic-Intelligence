@@ -1,7 +1,22 @@
 export interface Item {
   id: string;
   name: string;
+  storageId: string;
   detectedAt: number;
+  category?: string;
+  description?: string;
+  lastSeenAt?: number;
+  isEssential?: boolean;
+  isFrequentlyLost?: boolean;
+  isEmergency?: boolean;
+  caregiverNotes?: string;
+  customLabels?: string[];
+}
+
+export interface UserProfile {
+  id: string;
+  role: 'caregiver' | 'patient';
+  email: string;
 }
 
 export interface StorageUnit {

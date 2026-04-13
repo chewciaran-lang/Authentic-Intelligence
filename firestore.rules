@@ -61,21 +61,47 @@ service cloud.firestore {
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.ownerId is string &&
              data.updatedAt is number &&
-             (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() < 1048576)); // Limit to ~1MB
+             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() < 1048576));
+    }
+
+    function isCaregiver() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'caregiver';
+    }
+
+    function isValidUser(data) {
+      return hasRequiredFields(['role', 'email']) &&
+             hasOnlyAllowedFields(['role', 'email']) &&
+             data.role in ['caregiver', 'patient'] &&
+             data.email is string;
     }
 
     function isValidItem(data) {
       return hasRequiredFields(['name', 'storageId', 'ownerId', 'detectedAt']) &&
-             hasOnlyAllowedFields(['name', 'storageId', 'ownerId', 'detectedAt']) &&
+             hasOnlyAllowedFields(['name', 'storageId', 'ownerId', 'detectedAt', 'category', 'description', 'lastSeenAt', 'isEssential', 'isFrequentlyLost', 'isEmergency', 'caregiverNotes', 'customLabels']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.storageId is string &&
              data.ownerId is string &&
-             data.detectedAt is number;
+             data.detectedAt is number &&
+             (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 50)) &&
+             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 500)) &&
+             (!('lastSeenAt' in data) || data.lastSeenAt == null || data.lastSeenAt is number) &&
+             (!('isEssential' in data) || data.isEssential is bool) &&
+             (!('isFrequentlyLost' in data) || data.isFrequentlyLost is bool) &&
+             (!('isEmergency' in data) || data.isEmergency is bool) &&
+             (!('caregiverNotes' in data) || data.caregiverNotes == null || (data.caregiverNotes is string && data.caregiverNotes.size() <= 1000)) &&
+             (!('customLabels' in data) || (data.customLabels is list && data.customLabels.size() <= 10));
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
 
     match /storageUnits/{unitId} {
       allow read: if isDocOwner();

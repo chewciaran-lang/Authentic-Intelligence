@@ -23,6 +23,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isRoleSelectionOpen, setIsRoleSelectionOpen] = useState(false);
+  const [isSettingRole, setIsSettingRole] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [storageUnits, setStorageUnits] = useState<StorageUnit[]>([]);
   const [allItems, setAllItems] = useState<Item[]>([]);
@@ -117,12 +118,23 @@ export default function App() {
   }, []);
 
   const handleRoleSelection = async (role: 'caregiver' | 'patient') => {
-    if (user) {
+    if (!user) return;
+    setIsSettingRole(true);
+    try {
       await firebaseStore.createUserProfile(user.uid, user.email || "", role);
       const profile = await firebaseStore.getUserProfile(user.uid);
-      setUserProfile(profile);
-      setIsRoleSelectionOpen(false);
-      toast.success(`Welcome! You are now set up as a ${role}.`);
+      if (profile) {
+        setUserProfile(profile);
+        setIsRoleSelectionOpen(false);
+        toast.success(`Welcome! You are now set up as a ${role}.`);
+      } else {
+        toast.error("Failed to verify profile creation. Please try again.");
+      }
+    } catch (e) {
+      console.error("Role selection error:", e);
+      toast.error("Could not set up your profile. Please try again.");
+    } finally {
+      setIsSettingRole(false);
     }
   };
 
@@ -1075,7 +1087,7 @@ export default function App() {
                     <div className="flex items-center space-x-2">
                       <Checkbox 
                         id="essential" 
-                        checked={editingItem.isEssential} 
+                        checked={!!editingItem.isEssential} 
                         onCheckedChange={(checked) => setEditingItem({ ...editingItem, isEssential: !!checked })}
                       />
                       <label htmlFor="essential" className="text-sm font-medium leading-none flex items-center gap-2">
@@ -1086,7 +1098,7 @@ export default function App() {
                     <div className="flex items-center space-x-2">
                       <Checkbox 
                         id="frequentlyLost" 
-                        checked={editingItem.isFrequentlyLost} 
+                        checked={!!editingItem.isFrequentlyLost} 
                         onCheckedChange={(checked) => setEditingItem({ ...editingItem, isFrequentlyLost: !!checked })}
                       />
                       <label htmlFor="frequentlyLost" className="text-sm font-medium leading-none flex items-center gap-2">
@@ -1097,7 +1109,7 @@ export default function App() {
                     <div className="flex items-center space-x-2">
                       <Checkbox 
                         id="emergency" 
-                        checked={editingItem.isEmergency} 
+                        checked={!!editingItem.isEmergency} 
                         onCheckedChange={(checked) => setEditingItem({ ...editingItem, isEmergency: !!checked })}
                       />
                       <label htmlFor="emergency" className="text-sm font-medium leading-none flex items-center gap-2">
@@ -1212,9 +1224,20 @@ export default function App() {
           <div className="grid grid-cols-1 gap-4 py-6">
             <Button 
               variant="outline" 
-              className="h-32 rounded-2xl border-2 hover:border-zinc-900 flex flex-col gap-3 group"
+              disabled={isSettingRole}
+              className="h-32 rounded-2xl border-2 hover:border-zinc-900 flex flex-col gap-3 group relative overflow-hidden"
               onClick={() => handleRoleSelection('caregiver')}
             >
+              {isSettingRole && (
+                <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Archive className="h-6 w-6 text-zinc-400" />
+                  </motion.div>
+                </div>
+              )}
               <Shield className="h-8 w-8 text-zinc-400 group-hover:text-zinc-900" />
               <div className="text-center">
                 <p className="font-bold text-lg">Caregiver</p>
@@ -1223,9 +1246,20 @@ export default function App() {
             </Button>
             <Button 
               variant="outline" 
-              className="h-32 rounded-2xl border-2 hover:border-zinc-900 flex flex-col gap-3 group"
+              disabled={isSettingRole}
+              className="h-32 rounded-2xl border-2 hover:border-zinc-900 flex flex-col gap-3 group relative overflow-hidden"
               onClick={() => handleRoleSelection('patient')}
             >
+              {isSettingRole && (
+                <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Archive className="h-6 w-6 text-zinc-400" />
+                  </motion.div>
+                </div>
+              )}
               <Heart className="h-8 w-8 text-zinc-400 group-hover:text-zinc-900" />
               <div className="text-center">
                 <p className="font-bold text-lg">Patient / User</p>

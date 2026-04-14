@@ -216,6 +216,7 @@ export const firebaseStore = {
   },
 
   getUserProfile: async (uid: string): Promise<UserProfile | null> => {
+    const path = `users/${uid}`;
     try {
       const docRef = doc(db, 'users', uid);
       const docSnap = await getDoc(docRef);
@@ -224,23 +225,26 @@ export const firebaseStore = {
       }
       return null;
     } catch (error) {
-      console.error("Error fetching user profile:", error);
+      handleFirestoreError(error, OperationType.GET, path);
       return null;
     }
   },
 
   createUserProfile: async (uid: string, email: string, role: 'caregiver' | 'patient') => {
+    const path = `users/${uid}`;
     try {
       await setDoc(doc(db, 'users', uid), {
         email,
-        role
+        role,
+        customCategories: []
       });
     } catch (error) {
-      console.error("Error creating user profile:", error);
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
   },
 
   updateUserProfile: async (uid: string, updates: Partial<UserProfile>) => {
+    const path = `users/${uid}`;
     try {
       const data: any = {};
       Object.keys(updates).forEach(key => {
@@ -251,7 +255,7 @@ export const firebaseStore = {
       });
       await updateDoc(doc(db, 'users', uid), data);
     } catch (error) {
-      console.error("Error updating user profile:", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   },
 

@@ -7,7 +7,11 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Name of the storage unit (e.g., Kitchen Cupboard)."
+          "description": "Name of the storage unit (e.g., Cupboard)."
+        },
+        "location": {
+          "type": "string",
+          "description": "The room or area where the storage unit is located (e.g., Kitchen, Bedroom)."
         },
         "ownerId": {
           "type": "string",

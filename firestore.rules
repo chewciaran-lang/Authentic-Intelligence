@@ -57,11 +57,12 @@ service cloud.firestore {
 
     function isValidStorageUnit(data) {
       return hasRequiredFields(['name', 'ownerId', 'updatedAt']) &&
-             hasOnlyAllowedFields(['name', 'ownerId', 'updatedAt', 'imageUrl']) &&
+             hasOnlyAllowedFields(['name', 'ownerId', 'updatedAt', 'imageUrl', 'location']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.ownerId is string &&
              data.updatedAt is number &&
-             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() < 1048576));
+             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() < 1048576)) &&
+             (!('location' in data) || data.location == null || (data.location is string && data.location.size() <= 100));
     }
 
     function isCaregiver() {

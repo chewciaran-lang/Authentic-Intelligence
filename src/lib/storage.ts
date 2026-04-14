@@ -46,18 +46,38 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export const firebaseStore = {
-  addStorage: async (name: string, imageUrl?: string) => {
+  addStorage: async (name: string, location?: string, imageUrl?: string) => {
     if (!auth.currentUser) throw new Error("Not authenticated");
     const path = 'storageUnits';
     try {
       await addDoc(collection(db, path), {
         name,
+        location: location || null,
         ownerId: auth.currentUser.uid,
         updatedAt: Date.now(),
         imageUrl: imageUrl || null,
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  },
+
+  updateStorage: async (id: string, updates: Partial<StorageUnit>) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `storageUnits/${id}`;
+    try {
+      const data: any = { ...updates };
+      delete data.id;
+      data.updatedAt = Date.now();
+      
+      // Clean undefined values
+      Object.keys(data).forEach(key => {
+        if (data[key] === undefined) delete data[key];
+      });
+
+      await updateDoc(doc(db, 'storageUnits', id), data);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   },
 
@@ -81,6 +101,47 @@ export const firebaseStore = {
       const batch = writeBatch(db);
       snapshot.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  addItems: async (storageId: string, items: (string | { name: string, category?: string })[]) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = 'items';
+    try {
+      const batch = writeBatch(db);
+      
+      items.forEach((item) => {
+        const name = typeof item === 'string' ? item : item.name;
+        const category = typeof item === 'string' ? undefined : item.category;
+        
+        const newDoc = doc(collection(db, path));
+        batch.set(newDoc, {
+          name,
+          category: category || null,
+          storageId,
+          ownerId: auth.currentUser!.uid,
+          detectedAt: Date.now(),
+        });
+      });
+      
+      // Update storage timestamp
+      batch.update(doc(db, 'storageUnits', storageId), {
+        updatedAt: Date.now()
+      });
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  deleteItem: async (itemId: string) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `items/${itemId}`;
+    try {
+      await deleteDoc(doc(db, 'items', itemId));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
     }

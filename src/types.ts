@@ -23,6 +23,7 @@ export interface UserProfile {
 export interface StorageUnit {
   id: string;
   name: string;
+  location?: string;
   description?: string;
   items?: Item[];
   updatedAt: number;

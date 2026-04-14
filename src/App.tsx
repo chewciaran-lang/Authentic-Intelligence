@@ -32,6 +32,7 @@ export default function App() {
   const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newStorageName, setNewStorageName] = useState("");
+  const [newStorageLocation, setNewStorageLocation] = useState("");
   const [newStorageImage, setNewStorageImage] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isCapturingUnitImage, setIsCapturingUnitImage] = useState(false);
@@ -41,6 +42,7 @@ export default function App() {
   const [editingItemName, setEditingItemName] = useState("");
   const [editingItemCategory, setEditingItemCategory] = useState("");
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [editingStorage, setEditingStorage] = useState<StorageUnit | null>(null);
   const [newCustomLabel, setNewCustomLabel] = useState("");
   const unitVideoRef = React.useRef<HTMLVideoElement>(null);
   const unitCanvasRef = React.useRef<HTMLCanvasElement>(null);
@@ -174,8 +176,13 @@ export default function App() {
   const handleAddStorage = async () => {
     if (!newStorageName.trim()) return;
     try {
-      await firebaseStore.addStorage(newStorageName, newStorageImage || undefined);
+      await firebaseStore.addStorage(
+        newStorageName, 
+        newStorageLocation.trim() || undefined,
+        newStorageImage || undefined
+      );
       setNewStorageName("");
+      setNewStorageLocation("");
       setNewStorageImage(null);
       setIsAddDialogOpen(false);
       toast.success(`Created "${newStorageName}"`);
@@ -184,15 +191,37 @@ export default function App() {
     }
   };
 
-  const handleScanComplete = async (items: string[]) => {
+  const handleUpdateStorage = async (id: string, updates: Partial<StorageUnit>) => {
+    try {
+      await firebaseStore.updateStorage(id, updates);
+      setEditingStorage(null);
+      toast.success("Storage unit updated");
+    } catch (e) {
+      toast.error("Failed to update storage");
+    }
+  };
+
+  const handleScanComplete = async (scannedItems: string[]) => {
     if (activeStorageId) {
       try {
-        await firebaseStore.updateItems(activeStorageId, items);
+        const existingItems = allItems.filter(i => i.storageId === activeStorageId);
+        const newItems = scannedItems.filter(name => 
+          !existingItems.some(existing => existing.name.toLowerCase() === name.toLowerCase())
+        );
+
+        if (newItems.length === 0) {
+          toast.info("No new items found (all items already in storage)");
+          setIsScannerOpen(false);
+          setActiveStorageId(null);
+          return;
+        }
+
+        await firebaseStore.addItems(activeStorageId, newItems);
         setIsScannerOpen(false);
         setActiveStorageId(null);
-        toast.success(`Updated items in storage`);
+        toast.success(`Added ${newItems.length} new items to storage`);
       } catch (e) {
-        toast.error("Failed to update items");
+        toast.error("Failed to add items");
       }
     }
   };
@@ -214,10 +243,8 @@ export default function App() {
       return;
     }
     
-    const itemsToUpdate = currentItems.map(i => ({ name: i.name, category: i.category }));
-    
     try {
-      await firebaseStore.updateItems(unitId, [...itemsToUpdate, { 
+      await firebaseStore.addItems(unitId, [{ 
         name: editingItemName.trim(), 
         category: editingItemCategory.trim() || undefined 
       }]);
@@ -229,13 +256,9 @@ export default function App() {
     }
   };
 
-  const handleRemoveItemFromUnit = async (unitId: string, itemName: string) => {
-    const currentItems = allItems.filter(i => i.storageId === unitId);
-    const itemsToUpdate = currentItems
-      .filter(i => i.name !== itemName)
-      .map(i => ({ name: i.name, category: i.category }));
+  const handleRemoveItemFromUnit = async (itemId: string, itemName: string) => {
     try {
-      await firebaseStore.updateItems(unitId, itemsToUpdate);
+      await firebaseStore.deleteItem(itemId);
       toast.info(`Removed "${itemName}"`);
     } catch (e) {
       toast.error("Failed to remove item");
@@ -347,14 +370,14 @@ export default function App() {
                   variant="ghost"
                   size="sm"
                   onClick={toggleRole}
-                  className="hidden sm:flex items-center gap-2 text-zinc-500 hover:text-zinc-900"
+                  className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900"
                 >
                   {userProfile.role === 'caregiver' ? (
                     <Shield className="h-4 w-4" />
                   ) : (
                     <Heart className="h-4 w-4" />
                   )}
-                  <span className="text-xs font-medium capitalize">{userProfile.role} Mode</span>
+                  <span className="text-xs font-medium capitalize hidden sm:inline">{userProfile.role} Mode</span>
                 </Button>
               )}
               <Button 
@@ -568,9 +591,16 @@ export default function App() {
                     </div>
                   )}
                   <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
-                    <div>
-                      <CardTitle className="text-xl font-bold">{unit.name}</CardTitle>
-                      <CardDescription>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-xl font-bold truncate">{unit.name}</CardTitle>
+                        {unit.location && (
+                          <Badge variant="secondary" className="bg-zinc-100 text-zinc-500 font-normal rounded-lg px-2 py-0 h-5 text-[10px] uppercase tracking-wider">
+                            {unit.location}
+                          </Badge>
+                        )}
+                      </div>
+                      <CardDescription className="truncate">
                         {selectedCategory ? (
                           <span className="text-zinc-900 font-medium">
                             {matchingItems.length} {selectedCategory} items
@@ -581,26 +611,30 @@ export default function App() {
                         {" • "}Updated {new Date(unit.updatedAt).toLocaleDateString()}
                       </CardDescription>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="rounded-full h-8 w-8 text-zinc-400 hover:text-zinc-900"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingStorage(unit);
+                        }}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
                       <Button 
                         variant="secondary" 
                         size="sm" 
-                        className="rounded-full"
-                        onClick={() => {
+                        className="rounded-full h-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setActiveStorageId(unit.id);
                           setScannerMode('inventory');
                           setIsScannerOpen(true);
                         }}
                       >
-                        Scan Items
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-full text-zinc-400 hover:text-red-500"
-                        onClick={() => handleDeleteStorage(unit.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
+                        Scan
                       </Button>
                     </div>
                   </CardHeader>
@@ -706,7 +740,7 @@ export default function App() {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7 rounded-full text-zinc-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover/item:opacity-100 transition-all"
-                                    onClick={() => handleRemoveItemFromUnit(unit.id, item.name)}
+                                    onClick={() => handleRemoveItemFromUnit(item.id, item.name)}
                                   >
                                     <X className="h-3.5 w-3.5" />
                                   </Button>
@@ -813,11 +847,20 @@ export default function App() {
               <div className="space-y-2">
                 <label className="text-sm font-medium text-zinc-500">Name</label>
                 <Input 
-                  placeholder="e.g. Kitchen Cupboard 1" 
+                  placeholder="e.g. Cupboard, Drawer, Box" 
                   value={newStorageName}
                   onChange={(e) => setNewStorageName(e.target.value)}
                   className="h-12 rounded-xl"
                   autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-500">Location</label>
+                <Input 
+                  placeholder="e.g. Kitchen, Bedroom, Garage" 
+                  value={newStorageLocation}
+                  onChange={(e) => setNewStorageLocation(e.target.value)}
+                  className="h-12 rounded-xl"
                 />
               </div>
             </div>
@@ -897,6 +940,60 @@ export default function App() {
               className="w-full h-12 rounded-xl bg-zinc-100 text-zinc-900 hover:bg-zinc-200"
             >
               Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Storage Edit Dialog */}
+      <Dialog open={!!editingStorage} onOpenChange={(open) => !open && setEditingStorage(null)}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Storage Unit</DialogTitle>
+          </DialogHeader>
+          {editingStorage && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-500">Name</label>
+                <Input 
+                  value={editingStorage.name}
+                  onChange={(e) => setEditingStorage({ ...editingStorage, name: e.target.value })}
+                  className="h-12 rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-500">Location</label>
+                <Input 
+                  value={editingStorage.location || ""}
+                  onChange={(e) => setEditingStorage({ ...editingStorage, location: e.target.value })}
+                  className="h-12 rounded-xl"
+                  placeholder="e.g. Kitchen, Bedroom"
+                />
+              </div>
+              <div className="pt-4 border-t border-zinc-100">
+                <Button 
+                  variant="ghost" 
+                  className="w-full text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl h-12 flex items-center justify-center gap-2"
+                  onClick={() => {
+                    handleDeleteStorage(editingStorage.id);
+                    setEditingStorage(null);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete Storage Unit
+                </Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button 
+              onClick={() => editingStorage && handleUpdateStorage(editingStorage.id, {
+                name: editingStorage.name,
+                location: editingStorage.location || undefined
+              })} 
+              className="w-full h-12 rounded-xl bg-zinc-900 text-white"
+            >
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

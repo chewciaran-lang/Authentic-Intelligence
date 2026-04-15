@@ -101,6 +101,14 @@
           "type": "string",
           "description": "Private notes from the caregiver."
         },
+        "backupLocation": {
+          "type": "string",
+          "description": "A secondary place where the item might be kept if not in its primary storage."
+        },
+        "helpRequested": {
+          "type": "boolean",
+          "description": "Flag indicating the patient needs help finding this item."
+        },
         "customLabels": {
           "type": "array",
           "items": {
@@ -110,6 +118,49 @@
         }
       },
       "required": ["name", "storageId", "ownerId", "detectedAt"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "A scheduled activity for the patient.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the user who owns this activity."
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the activity."
+        },
+        "startTime": {
+          "type": "number",
+          "description": "Timestamp when the activity starts."
+        },
+        "location": {
+          "type": "string",
+          "description": "Location of the activity."
+        },
+        "itemsToBring": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of item IDs to bring."
+        },
+        "reminded": {
+          "type": "boolean",
+          "description": "Whether a reminder has been sent."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the activity has been completed."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp when the activity was created."
+        }
+      },
+      "required": ["ownerId", "title", "startTime", "createdAt"]
     }
   },
   "firestore": {
@@ -124,6 +175,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "User profiles and roles."
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Scheduled activities for patients."
     }
   }
 }

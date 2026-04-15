@@ -80,7 +80,7 @@ service cloud.firestore {
 
     function isValidItem(data) {
       return hasRequiredFields(['name', 'storageId', 'ownerId', 'detectedAt']) &&
-             hasOnlyAllowedFields(['name', 'storageId', 'ownerId', 'detectedAt', 'category', 'description', 'lastSeenAt', 'isEssential', 'isFrequentlyLost', 'isEmergency', 'caregiverNotes', 'customLabels']) &&
+             hasOnlyAllowedFields(['name', 'storageId', 'ownerId', 'detectedAt', 'category', 'description', 'lastSeenAt', 'isEssential', 'isFrequentlyLost', 'isEmergency', 'caregiverNotes', 'customLabels', 'backupLocation', 'helpRequested']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.storageId is string &&
              data.ownerId is string &&
@@ -92,7 +92,22 @@ service cloud.firestore {
              (!('isFrequentlyLost' in data) || data.isFrequentlyLost is bool) &&
              (!('isEmergency' in data) || data.isEmergency is bool) &&
              (!('caregiverNotes' in data) || data.caregiverNotes == null || (data.caregiverNotes is string && data.caregiverNotes.size() <= 1000)) &&
+             (!('backupLocation' in data) || data.backupLocation == null || (data.backupLocation is string && data.backupLocation.size() <= 500)) &&
+             (!('helpRequested' in data) || data.helpRequested is bool) &&
              (!('customLabels' in data) || (data.customLabels is list && data.customLabels.size() <= 10));
+    }
+
+    function isValidActivity(data) {
+      return hasRequiredFields(['ownerId', 'title', 'startTime', 'createdAt']) &&
+             hasOnlyAllowedFields(['ownerId', 'title', 'startTime', 'location', 'itemsToBring', 'reminded', 'completed', 'createdAt']) &&
+             data.ownerId is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.startTime is number &&
+             (!('location' in data) || data.location is string && data.location.size() <= 200) &&
+             (!('itemsToBring' in data) || data.itemsToBring is list && data.itemsToBring.size() <= 20) &&
+             (!('reminded' in data) || data.reminded is bool) &&
+             (!('completed' in data) || data.completed is bool) &&
+             data.createdAt is number;
     }
 
     // ===============================================================
@@ -106,17 +121,24 @@ service cloud.firestore {
     }
 
     match /storageUnits/{unitId} {
-      allow read: if isDocOwner();
-      allow create: if isRequestOwner() && isValidStorageUnit(request.resource.data);
-      allow update: if isDocOwner() && isRequestOwner() && isValidStorageUnit(request.resource.data);
-      allow delete: if isDocOwner();
+      allow read: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid && isValidStorageUnit(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && isValidStorageUnit(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
     }
 
     match /items/{itemId} {
-      allow read: if isDocOwner();
-      allow create: if isRequestOwner() && isValidItem(request.resource.data);
-      allow update: if isDocOwner() && isRequestOwner() && isValidItem(request.resource.data);
-      allow delete: if isDocOwner();
+      allow read: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid && isValidItem(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && isValidItem(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /activities/{activityId} {
+      allow read: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid && isValidActivity(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && isValidActivity(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
     }
     
     match /test/connection {

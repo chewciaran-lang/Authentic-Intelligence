@@ -12,7 +12,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { AppState, StorageUnit, Item, UserProfile } from "../types";
+import { AppState, StorageUnit, Item, UserProfile, Activity } from "../types";
 import { getDoc, setDoc } from 'firebase/firestore';
 
 export enum OperationType {
@@ -208,6 +208,7 @@ export const firebaseStore = {
       if (data.category === "") data.category = null;
       if (data.description === "") data.description = null;
       if (data.caregiverNotes === "") data.caregiverNotes = null;
+      if (data.backupLocation === "") data.backupLocation = null;
       
       await updateDoc(doc(db, 'items', itemId), data);
     } catch (error) {
@@ -271,29 +272,101 @@ export const firebaseStore = {
     }
   },
 
-  subscribeToData: (callback: (data: { storageUnits: StorageUnit[], items: Item[] }) => void) => {
+  addActivity: async (title: string, startTime: number, location?: string, itemsToBring: string[] = []) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = 'activities';
+    try {
+      await addDoc(collection(db, path), {
+        ownerId: auth.currentUser.uid,
+        title,
+        startTime,
+        location: location || null,
+        itemsToBring,
+        reminded: false,
+        completed: false,
+        createdAt: Date.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  },
+
+  updateActivity: async (id: string, updates: Partial<Activity>) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `activities/${id}`;
+    try {
+      const data: any = { ...updates };
+      delete data.id;
+      
+      Object.keys(data).forEach(key => {
+        if (data[key] === undefined) delete data[key];
+      });
+
+      await updateDoc(doc(db, 'activities', id), data);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  deleteActivity: async (id: string) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `activities/${id}`;
+    try {
+      await deleteDoc(doc(db, 'activities', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  toggleActivityCompletion: async (id: string, completed: boolean) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const path = `activities/${id}`;
+    try {
+      await updateDoc(doc(db, 'activities', id), { completed });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  subscribeToData: (callback: (data: { storageUnits: StorageUnit[], items: Item[], activities: Activity[] }) => void) => {
     if (!auth.currentUser) return () => {};
 
     const uid = auth.currentUser.uid;
     const storageQuery = query(collection(db, 'storageUnits'), where('ownerId', '==', uid));
     const itemsQuery = query(collection(db, 'items'), where('ownerId', '==', uid));
+    const activitiesQuery = query(collection(db, 'activities'), where('ownerId', '==', uid));
 
     let currentStorage: any[] = [];
     let currentItems: any[] = [];
+    let currentActivities: any[] = [];
+
+    const update = () => {
+      callback({ 
+        storageUnits: currentStorage, 
+        items: currentItems, 
+        activities: currentActivities 
+      });
+    };
 
     const unsubStorage = onSnapshot(storageQuery, (snapshot) => {
       currentStorage = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      callback({ storageUnits: currentStorage, items: currentItems });
+      update();
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'storageUnits'));
 
     const unsubItems = onSnapshot(itemsQuery, (snapshot) => {
       currentItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      callback({ storageUnits: currentStorage, items: currentItems });
+      update();
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'items'));
+
+    const unsubActivities = onSnapshot(activitiesQuery, (snapshot) => {
+      currentActivities = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      update();
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'activities'));
 
     return () => {
       unsubStorage();
       unsubItems();
+      unsubActivities();
     };
   }
 };

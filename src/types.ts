@@ -10,6 +10,8 @@ export interface Item {
   isFrequentlyLost?: boolean;
   isEmergency?: boolean;
   caregiverNotes?: string;
+  backupLocation?: string;
+  helpRequested?: boolean;
   customLabels?: string[];
 }
 
@@ -28,6 +30,18 @@ export interface StorageUnit {
   items?: Item[];
   updatedAt: number;
   imageUrl?: string;
+}
+
+export interface Activity {
+  id: string;
+  ownerId: string;
+  title: string;
+  startTime: number;
+  location?: string;
+  itemsToBring: string[]; // IDs of items
+  reminded: boolean;
+  completed?: boolean;
+  createdAt: number;
 }
 
 export interface AppState {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Archive, MapPin, Trash2, ChevronRight, Info, MoreVertical, LogIn, LogOut, User, Camera, X, Shield, Heart, AlertCircle, Star, HelpCircle, Tag } from "lucide-react";
+import { Search, Plus, Archive, MapPin, Trash2, ChevronRight, Info, MoreVertical, LogIn, LogOut, User, Camera, X, Shield, Heart, AlertCircle, Star, HelpCircle, Tag, Sparkles, Calendar, Clock, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,11 +10,13 @@ import { Scanner } from "./components/Scanner";
 import { firebaseStore } from "./lib/storage";
 import { auth, signIn, logOut } from "./lib/firebase";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
-import { StorageUnit, Item, UserProfile } from "./types";
+import { StorageUnit, Item, UserProfile, Activity } from "./types";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
+import Fuse from "fuse.js";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const DEFAULT_CATEGORIES = ["Kitchen", "Medication", "Tools", "Documents", "Clothing", "Electronics"];
 
@@ -44,7 +46,19 @@ export default function App() {
   const [editingItemCategory, setEditingItemCategory] = useState("");
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [editingStorage, setEditingStorage] = useState<StorageUnit | null>(null);
+  const [lostItem, setLostItem] = useState<Item | null>(null);
+  const [escalationStep, setEscalationStep] = useState<number>(0);
+  const [aiHint, setAiHint] = useState<string>("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const [newCustomLabel, setNewCustomLabel] = useState("");
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [activeTab, setActiveTab] = useState<'inventory' | 'activities'>('inventory');
+  const [isAddActivityOpen, setIsAddActivityOpen] = useState(false);
+  const [newActivityTitle, setNewActivityTitle] = useState("");
+  const [newActivityTime, setNewActivityTime] = useState("");
+  const [newActivityLocation, setNewActivityLocation] = useState("");
+  const [newActivityItems, setNewActivityItems] = useState<string[]>([]);
+  const [activityItemSearchQuery, setActivityItemSearchQuery] = useState("");
   const unitVideoRef = React.useRef<HTMLVideoElement>(null);
   const unitCanvasRef = React.useRef<HTMLCanvasElement>(null);
 
@@ -174,17 +188,83 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
-      const unsub = firebaseStore.subscribeToData(({ storageUnits, items }) => {
+      const unsub = firebaseStore.subscribeToData(({ storageUnits, items, activities }) => {
         setStorageUnits(storageUnits);
         setAllItems(items);
+        setActivities(activities);
       });
       return () => unsub();
     } else {
       setStorageUnits([]);
       setAllItems([]);
+      setActivities([]);
     }
   }, [user]);
 
+  const handleAddActivity = async () => {
+    if (!newActivityTitle.trim() || !newActivityTime) {
+      toast.error("Please provide a title and time");
+      return;
+    }
+    try {
+      await firebaseStore.addActivity(
+        newActivityTitle,
+        new Date(newActivityTime).getTime(),
+        newActivityLocation || undefined,
+        newActivityItems
+      );
+      setNewActivityTitle("");
+      setNewActivityTime("");
+      setNewActivityLocation("");
+      setNewActivityItems([]);
+      setActivityItemSearchQuery("");
+      setIsAddActivityOpen(false);
+      toast.success("Activity scheduled");
+    } catch (e) {
+      toast.error("Failed to schedule activity");
+    }
+  };
+
+  // Reminder Logic
+  useEffect(() => {
+    if (userProfile?.role === 'patient' && activities.length > 0) {
+      const checkReminders = () => {
+        const now = Date.now();
+        activities.forEach(activity => {
+          // Remind 15 minutes before
+          const reminderTime = activity.startTime - (15 * 60 * 1000);
+          if (!activity.reminded && now >= reminderTime && now < activity.startTime) {
+            const items = activity.itemsToBring.map(id => allItems.find(i => i.id === id)?.name).filter(Boolean);
+            toast(`Reminder: ${activity.title} in 15 mins!`, {
+              description: `Location: ${activity.location || 'Not specified'}. ${items.length > 0 ? 'Bring: ' + items.join(', ') : ''}`,
+              duration: 10000,
+              icon: <Calendar className="h-5 w-5 text-zinc-900" />
+            });
+            firebaseStore.updateActivity(activity.id, { reminded: true });
+          }
+        });
+      };
+
+      const interval = setInterval(checkReminders, 30000); // Check every 30s
+      return () => clearInterval(interval);
+    }
+  }, [activities, userProfile, allItems]);
+
+  // Auto-deletion logic
+  useEffect(() => {
+    if (activities.length === 0) return;
+    const checkDeletion = () => {
+      const now = Date.now();
+      activities.forEach(activity => {
+        // Auto-delete 10 mins after start time
+        if (now >= activity.startTime + (10 * 60 * 1000)) {
+          firebaseStore.deleteActivity(activity.id);
+        }
+      });
+    };
+    const interval = setInterval(checkDeletion, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [activities]);
   const handleAddStorage = async () => {
     if (!newStorageName.trim()) return;
     try {
@@ -300,18 +380,58 @@ export default function App() {
     }
   };
 
+  const fuse = new Fuse<Item>(allItems, {
+    keys: ['name', 'category', 'description', 'customLabels'],
+    threshold: 0.4,
+    includeScore: true,
+    ignoreLocation: true
+  });
+
   const filteredResults = searchQuery.trim() 
-    ? allItems
-        .filter(item => 
-          item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.category?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-        .map(item => ({
-          item,
-          unit: storageUnits.find(u => u.id === item.storageId)
+    ? fuse.search(searchQuery)
+        .map(result => ({
+          item: result.item,
+          unit: storageUnits.find(u => u.id === result.item.storageId)
         }))
         .filter(res => res.unit)
     : [];
+
+  const handleLostMode = async (item: Item) => {
+    setLostItem(item);
+    setEscalationStep(1);
+    setIsAiLoading(true);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `I am helping a patient find their ${item.name}. It is usually in the ${storageUnits.find(u => u.id === item.storageId)?.name || 'storage'}. 
+        Provide 3 short, comforting hints or common places where someone might accidentally leave this item. 
+        Keep it simple and friendly for someone with memory issues.`,
+      });
+      setAiHint(response.text || "Try looking in nearby drawers or on the counter.");
+    } catch (e) {
+      setAiHint("Try looking in nearby drawers or on the counter.");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleEscalateLostMode = async () => {
+    if (!lostItem) return;
+    
+    if (escalationStep === 1) {
+      setEscalationStep(2);
+    } else if (escalationStep === 2) {
+      setEscalationStep(3);
+      try {
+        await firebaseStore.updateItem(lostItem.id, { helpRequested: true });
+        toast.success("Caregiver has been notified");
+      } catch (e) {
+        toast.error("Failed to notify caregiver");
+      }
+    }
+  };
 
   const categories = Array.from(new Set([
     ...DEFAULT_CATEGORIES, 
@@ -429,7 +549,35 @@ export default function App() {
       </header>
 
       <main className="max-w-2xl mx-auto p-4 space-y-6">
-        {/* Category Toggles */}
+        {/* Tab Navigation */}
+        <div className="flex p-1 bg-zinc-100 rounded-2xl">
+          <button
+            onClick={() => setActiveTab('inventory')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl transition-all ${
+              activeTab === 'inventory' 
+                ? "bg-white text-zinc-900 shadow-sm" 
+                : "text-zinc-500 hover:text-zinc-700"
+            }`}
+          >
+            <Archive className="h-4 w-4" />
+            Inventory
+          </button>
+          <button
+            onClick={() => setActiveTab('activities')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl transition-all ${
+              activeTab === 'activities' 
+                ? "bg-white text-zinc-900 shadow-sm" 
+                : "text-zinc-500 hover:text-zinc-700"
+            }`}
+          >
+            <Calendar className="h-4 w-4" />
+            Activities
+          </button>
+        </div>
+
+        {activeTab === 'inventory' ? (
+          <>
+            {/* Category Toggles */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
           <Button
             variant={selectedCategory === null ? "default" : "outline"}
@@ -519,6 +667,18 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Button
+                          variant="secondary"
+                          size="sm"
+                          className="rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 px-3 flex items-center gap-1.5 font-semibold shadow-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLostMode(res.item);
+                          }}
+                        >
+                          <HelpCircle className="h-4 w-4" />
+                          Lost?
+                        </Button>
+                        <Button
                           variant="ghost"
                           size="icon"
                           className="rounded-full text-zinc-400 hover:text-zinc-900"
@@ -542,13 +702,58 @@ export default function App() {
                   </Card>
                 ))
               ) : (
-                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-zinc-300">
+                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-zinc-300 space-y-4">
                   <p className="text-zinc-400">No items found matching "{searchQuery}"</p>
+                  <Button 
+                    variant="outline" 
+                    className="rounded-full"
+                    onClick={() => {
+                      // Just trigger a general help dialog or similar
+                      toast.info("Try searching for a different name or category.");
+                    }}
+                  >
+                    Still can't find it?
+                  </Button>
                 </div>
               )}
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Help Requests (Caregiver only) */}
+        {userProfile?.role === 'caregiver' && allItems.some(i => i.helpRequested) && (
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-red-500 uppercase tracking-wider px-2 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              Help Requested
+            </h2>
+            <div className="grid gap-2">
+              {allItems.filter(i => i.helpRequested).map(item => (
+                <Card key={item.id} className="border-red-100 bg-red-50/50">
+                  <CardContent className="p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-red-100 flex items-center justify-center text-red-600">
+                        <HelpCircle className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-red-900">{item.name}</p>
+                        <p className="text-[10px] text-red-700">Patient is looking for this item</p>
+                      </div>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="text-red-600 hover:bg-red-100 rounded-full h-8"
+                      onClick={() => firebaseStore.updateItem(item.id, { helpRequested: false })}
+                    >
+                      Clear
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Storage Units */}
         <div className="space-y-4">
@@ -738,6 +943,15 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <Button
+                                    variant="secondary"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 border border-amber-100 transition-all shadow-sm"
+                                    onClick={() => handleLostMode(item)}
+                                    title="Help me find this"
+                                  >
+                                    <HelpCircle className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7 rounded-full text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 opacity-0 group-hover/item:opacity-100 transition-all"
@@ -796,10 +1010,224 @@ export default function App() {
             )}
           </div>
         </div>
+      </>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">
+                Upcoming Activities
+              </h2>
+              {userProfile?.role === 'caregiver' && (
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="rounded-full h-8 px-3 text-xs"
+                  onClick={() => setIsAddActivityOpen(true)}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add Activity
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {activities
+                .sort((a, b) => a.startTime - b.startTime)
+                .filter(a => a.startTime > Date.now() - (60 * 60 * 1000)) // Show current and future
+                .map(activity => {
+                  const isImminent = activity.startTime - Date.now() <= 60 * 60 * 1000 && activity.startTime > Date.now();
+                  const isPast = activity.startTime < Date.now();
+                  
+                  return (
+                  <Card 
+                    key={activity.id} 
+                    className={`overflow-hidden border-zinc-200 shadow-sm transition-all ${
+                      activity.completed 
+                        ? "opacity-60 grayscale" 
+                        : isImminent 
+                          ? "ring-2 ring-zinc-900 border-zinc-900 shadow-lg scale-[1.02]" 
+                          : ""
+                    }`}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-4">
+                          <div className={`h-12 w-12 rounded-xl flex items-center justify-center transition-colors ${
+                            isImminent ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-600"
+                          }`}>
+                            <Calendar className="h-6 w-6" />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg">{activity.title}</h3>
+                              {isImminent && !activity.completed && (
+                                <Badge className="bg-zinc-900 text-white animate-pulse">Starting Soon</Badge>
+                              )}
+                              {activity.completed && (
+                                <Badge variant="secondary" className="bg-green-100 text-green-700 border-none">Completed</Badge>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-sm text-zinc-500">
+                              <span className={`flex items-center gap-1 ${isImminent && !activity.completed ? "text-zinc-900 font-bold" : ""}`}>
+                                <Clock className="h-3.5 w-3.5" />
+                                {new Date(activity.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              {activity.location && (
+                                <span className="flex items-center gap-1">
+                                  <MapPin className="h-3.5 w-3.5" />
+                                  {activity.location}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {userProfile?.role === 'caregiver' && (
+                            <>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className={`rounded-full h-8 px-3 text-xs flex items-center gap-1.5 ${
+                                  activity.completed 
+                                    ? "text-green-600 hover:text-green-700 hover:bg-green-50" 
+                                    : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+                                }`}
+                                onClick={() => firebaseStore.toggleActivityCompletion(activity.id, !activity.completed)}
+                              >
+                                {activity.completed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <div className="h-3.5 w-3.5 rounded-full border-2 border-zinc-300" />}
+                                {activity.completed ? "Completed" : "Mark Done"}
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="text-zinc-400 hover:text-red-500 h-8 w-8"
+                                onClick={() => firebaseStore.deleteActivity(activity.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                    {activity.itemsToBring.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-zinc-100">
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Items to bring:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {activity.itemsToBring.map(itemId => {
+                            const item = allItems.find(i => i.id === itemId);
+                            return item ? (
+                              <Badge key={itemId} variant="secondary" className="bg-zinc-100 text-zinc-700 border-none flex items-center gap-1.5 py-1 px-2.5">
+                                <CheckCircle2 className="h-3 w-3 text-zinc-400" />
+                                {item.name}
+                              </Badge>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                  );
+                })}
+
+              {activities.length === 0 && (
+                <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-zinc-200">
+                  <Calendar className="h-12 w-12 text-zinc-200 mx-auto mb-4" />
+                  <p className="text-zinc-500 font-medium">No activities scheduled</p>
+                  <p className="text-zinc-400 text-sm">Activities and reminders will appear here</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
+      {/* Add Activity Dialog */}
+      <Dialog open={isAddActivityOpen} onOpenChange={setIsAddActivityOpen}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Schedule Activity</DialogTitle>
+            <DialogDescription>Remind the patient what to bring and where to go.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-500">Activity Title</label>
+              <Input 
+                placeholder="e.g. Doctor's Appointment" 
+                value={newActivityTitle}
+                onChange={(e) => setNewActivityTitle(e.target.value)}
+                className="h-12 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-500">Date & Time</label>
+              <Input 
+                type="datetime-local"
+                value={newActivityTime}
+                onChange={(e) => setNewActivityTime(e.target.value)}
+                className="h-12 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-500">Location</label>
+              <Input 
+                placeholder="e.g. City Hospital" 
+                value={newActivityLocation}
+                onChange={(e) => setNewActivityLocation(e.target.value)}
+                className="h-12 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-500">Items to Bring</label>
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                <Input 
+                  placeholder="Search items..." 
+                  value={activityItemSearchQuery}
+                  onChange={(e) => setActivityItemSearchQuery(e.target.value)}
+                  className="h-10 pl-9 rounded-xl text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto p-1 border rounded-xl">
+                {allItems
+                  .filter(item => item.name.toLowerCase().includes(activityItemSearchQuery.toLowerCase()))
+                  .map(item => (
+                  <div key={item.id} className="flex items-center space-x-2 p-2 hover:bg-zinc-50 rounded-lg transition-colors">
+                    <Checkbox 
+                      id={`item-${item.id}`}
+                      checked={newActivityItems.includes(item.id)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setNewActivityItems([...newActivityItems, item.id]);
+                        } else {
+                          setNewActivityItems(newActivityItems.filter(id => id !== item.id));
+                        }
+                      }}
+                    />
+                    <label htmlFor={`item-${item.id}`} className="text-sm text-zinc-700 flex-1 cursor-pointer">{item.name}</label>
+                  </div>
+                ))}
+                {allItems.filter(item => item.name.toLowerCase().includes(activityItemSearchQuery.toLowerCase())).length === 0 && (
+                  <p className="text-center py-4 text-xs text-zinc-400">No items found</p>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleAddActivity}
+              className="w-full h-12 rounded-xl bg-zinc-900 text-white"
+            >
+              Schedule Activity
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Floating Action Button */}
-      <div className="fixed bottom-8 left-0 right-0 flex justify-center px-4 pointer-events-none">
+      {activeTab === 'inventory' && (
+        <div className="fixed bottom-8 left-0 right-0 flex justify-center px-4 pointer-events-none">
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger 
             render={
@@ -887,6 +1315,7 @@ export default function App() {
           </DialogContent>
         </Dialog>
       </div>
+      )}
 
       {/* Category Management Dialog */}
       <Dialog open={isManageCategoriesOpen} onOpenChange={setIsManageCategoriesOpen}>
@@ -1077,6 +1506,17 @@ export default function App() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-500">Backup Location</label>
+                <Input 
+                  value={editingItem.backupLocation || ""}
+                  onChange={(e) => setEditingItem({ ...editingItem, backupLocation: e.target.value })}
+                  className="h-12 rounded-xl"
+                  placeholder="Where else might this be kept?"
+                />
+                <p className="text-[10px] text-zinc-400">This will be shown to the patient if they can't find the item.</p>
+              </div>
+
               {userProfile?.role === 'caregiver' && (
                 <div className="space-y-4 pt-4 border-t border-zinc-100">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
@@ -1202,6 +1642,7 @@ export default function App() {
                 isFrequentlyLost: editingItem.isFrequentlyLost,
                 isEmergency: editingItem.isEmergency,
                 caregiverNotes: editingItem.caregiverNotes || undefined,
+                backupLocation: editingItem.backupLocation || undefined,
                 customLabels: editingItem.customLabels || undefined
               })} 
               className="w-full h-12 rounded-xl bg-zinc-900 text-white"
@@ -1286,6 +1727,113 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Lost Mode Escalation Dialog */}
+      <Dialog open={!!lostItem} onOpenChange={(open) => !open && setLostItem(null)}>
+        <DialogContent className="sm:max-w-md rounded-3xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HelpCircle className="h-5 w-5 text-zinc-900" />
+              Can't find your {lostItem?.name}?
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <AnimatePresence mode="wait">
+              {escalationStep === 1 && (
+                <motion.div
+                  key="step1"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-4"
+                >
+                  <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100">
+                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <Sparkles className="h-3 w-3 text-amber-500" />
+                      AI Guidance
+                    </p>
+                    {isAiLoading ? (
+                      <div className="flex items-center gap-3 py-2">
+                        <motion.div 
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        >
+                          <Archive className="h-4 w-4 text-zinc-400" />
+                        </motion.div>
+                        <p className="text-sm text-zinc-500 italic">Thinking of places to look...</p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-zinc-700 leading-relaxed whitespace-pre-wrap">
+                        {aiHint}
+                      </p>
+                    )}
+                  </div>
+                  <Button 
+                    className="w-full h-12 rounded-xl bg-zinc-900 text-white"
+                    onClick={handleEscalateLostMode}
+                  >
+                    Still can't find it
+                  </Button>
+                </motion.div>
+              )}
+
+              {escalationStep === 2 && (
+                <motion.div
+                  key="step2"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-4"
+                >
+                  <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                      <MapPin className="h-3 w-3" />
+                      Backup Location
+                    </p>
+                    <p className="text-sm text-blue-900 font-medium">
+                      Check here: <span className="font-bold underline">{lostItem?.backupLocation || "Common nearby surfaces or drawers."}</span>
+                    </p>
+                  </div>
+                  <Button 
+                    className="w-full h-12 rounded-xl bg-zinc-900 text-white"
+                    onClick={handleEscalateLostMode}
+                  >
+                    I need more help
+                  </Button>
+                </motion.div>
+              )}
+
+              {escalationStep === 3 && (
+                <motion.div
+                  key="step3"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-4"
+                >
+                  <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-full bg-red-500 flex items-center justify-center text-white shrink-0">
+                      <Shield className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-red-900">Caregiver Alerted</p>
+                      <p className="text-xs text-red-700">Don't worry, we've sent a message to your caregiver to help you find it.</p>
+                    </div>
+                  </div>
+                  <Button 
+                    variant="outline"
+                    className="w-full h-12 rounded-xl border-zinc-200"
+                    onClick={() => setLostItem(null)}
+                  >
+                    Close
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Image Preview Overlay */}
       <AnimatePresence>
